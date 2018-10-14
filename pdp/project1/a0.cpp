@@ -34,8 +34,8 @@ void extract_if(const std::vector<T>& in, std::vector<T>& out, Pred pred) {
 
 
 int main(int argc, const char* argv[]) {
-    if (argc != 3) {
-        std::cout << "usage: " << "a0 n P/S" << std::endl;
+    if (argc != 2) {
+        std::cout << "usage: " << "a0 n" << std::endl;
         return -1;
     }
 
@@ -46,13 +46,22 @@ int main(int argc, const char* argv[]) {
     std::generate(std::begin(X), std::end(X), std::bind(ui, rng));
 
     std::vector<int> Y;
+    Y.clear();
 
     auto start = std::chrono::system_clock::now();
-    if (*argv[2] == 'P') omp_extract_if(X, Y, is_prime);
-    else extract_if(X, Y, is_prime);
+    extract_if(X, Y, is_prime);
     auto end = std::chrono::system_clock::now();
 
-    std::cout << std::chrono::duration<double>(end - start).count() << std::endl;
+    std::cout << "Seqential time: " << std::chrono::duration<double>(end - start).count() << std::endl;
+
+    Y.clear();
+
+    start = std::chrono::system_clock::now();
+    omp_extract_if(X, Y, is_prime);
+    end = std::chrono::system_clock::now();
+
+    std::cout << "Parallel time:\t" << std::chrono::duration<double>(end - start).count() << std::endl;
+
 
     return 0;
 } // main
