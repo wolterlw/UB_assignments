@@ -25,17 +25,18 @@ void omp_cumsum(long int* x, long int n){
     for (long int cur=2; cur<=n; cur*=2){
     	prev = cur / 2;
 
-    	#pragma omp parallel for private(i), shared(n, cur, prev, x)
+    	#pragma omp parallel for private(i), shared(n, prev, cur, x)
     	for (i = 0; i<n/cur; i++){
     		x[(i+1) * cur - 1] = x[(i+1) * cur - 1] + x[(2*i+1)*prev - 1];
 		}
 
-		//not yet parallel beucase of "add"
+		//possible problems with (i/prev)*prev
     	if (cur > 4){
-    		for (i = prev + 3; i <= n; i+=2){
-    			if ((i-3) % prev == 0) add = i-4;  //CAUTION Race Condition!!!!
-    			if ((prev+2 < i % cur) and (i % cur < cur)) x[i-2] = x[add] + x[i-2];
-    		}
+			#pragma omp parallel for private(i), shared(n, prev, cur, x)
+    		for (i = prev + 3; i <= n; i+=2)
+	    		if ((prev+2 < i % cur) and (i % cur < cur)) {
+	    			x[i-2] = x[(i / prev) * prev - 1] + x[i-2];
+	    		}
     	}
     }
 

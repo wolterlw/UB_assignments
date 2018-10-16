@@ -45,23 +45,24 @@ int main(int argc, const char* argv[]) {
     std::vector<int> X(std::atol(argv[1]));
     std::generate(std::begin(X), std::end(X), std::bind(ui, rng));
 
-    std::vector<int> Y;
-    Y.clear();
+    std::vector<int> Y_s;
+    std::vector<int> Y_p;
+
 
     auto start = std::chrono::system_clock::now();
-    extract_if(X, Y, is_prime);
+    extract_if(X, Y_s, is_prime);
     auto end = std::chrono::system_clock::now();
 
     std::cout << "Seqential time: " << std::chrono::duration<double>(end - start).count() << std::endl;
 
-    Y.clear();
-
     start = std::chrono::system_clock::now();
-    omp_extract_if(X, Y, is_prime);
+    omp_extract_if(X, Y_p, is_prime);
     end = std::chrono::system_clock::now();
 
     std::cout << "Parallel time:\t" << std::chrono::duration<double>(end - start).count() << std::endl;
 
+    if (Y_s == Y_p)std::cout << "Elements are same" << std::endl;
+    else std::cout << "Output is wrong dude((((" << std::endl; 
 
     return 0;
 } // main
