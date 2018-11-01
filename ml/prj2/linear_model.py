@@ -13,51 +13,6 @@ import pickle #used to cache RBF functions
 
 RMSE = lambda y_true,y_pred: np.sqrt(mean_squared_error(y_true, y_pred))
 
-class MinibatchOptimized():
-    """helper class to provide "fit" method"""
-    def score(self, X, y, sample_weight=None):
-        raise NotImplementedError
-
-    def step(self, X_train, Y_train):
-        """
-        implements the gradient descent step and updates parameters
-        """
-        raise NotImplementedError
-
-    def fit(self, X_train, Y_train, batch_generator, valid_set=None, n_epochs=1,**fit_params):
-        batch_generator.fit(X_train, Y_train)
-        Xtr,ytr = batch_generator.transform(X_train, Y_train)
-        if valid_set:
-            Xv,yv = batch_generator.transform(*valid_set)
-        
-        #initializing training history
-        hist = []
-        scores = [0,0,0] if valid_set else [0,0]
-        scores[1] = self.score(Xtr, ytr)
-        if valid_set:
-            scores[2] = self.score(Xv, yv)
-        hist.append(tuple(scores))
-        
-        #initializing iterators
-        epochs = tqdm(range(1, n_epochs))
-
-        for i in epochs:
-            scores[0] = i
-            for batch in batch_generator:
-                self.step(*batch)
-
-            scores[1] = self.score(Xtr, ytr)
-            dsc = f"epoch: {i} train-sc={scores[1]:.3f}"
-            
-            if valid_set:
-                scores[2] = self.score(Xv, yv)
-                dsc += f" valid-sc={scores[2]:.3f}"
-
-            hist.append(tuple(scores))
-            epochs.set_description(dsc)
-        self.fit_hist_ = hist
-        return self
-
 class Subsampler():
     def __init__(self, num_batches, y_oh = True, normalize=True, neg_weight=1):
         self.num_batches = num_batches
@@ -70,14 +25,22 @@ class Subsampler():
         self.pos_idx = np.argwhere(y == 1)[:, 0]
         self.neg_idx = np.argwhere(y == 0)[:, 0]
         self.n_pos = len(self.pos_idx)
-        self.X_ = X / X.max(axis=0) if self.normalize else X 
+        self.norm_val = X.max(axis=0)
+        self.X_ = X / self.norm_val if self.normalize else X 
         self.y_ = np.c_[1-y, y] if self.y_oh else y.reshape(-1,1)
         self.fitted = True
 
-    def transform(self, X, y):
-        X_ = X / X.max(axis=0) if self.normalize else X 
-        y_ = np.c_[1-y, y] if self.y_oh else y.reshape(-1,1)
-        return X_, y_
+    def transform(self, X, y, sample=False):
+        X = X / self.norm_val if self.normalize else X 
+        if sample:
+            pos_idx = np.argwhere(y == 1)[:, 0]
+            neg_idx = np.argwhere(y == 0)[:, 0]
+            neg_subsample = np.random.choice(neg_idx, int(len(pos_idx)*self.neg_weight), replace=False)
+            idx = np.r_[pos_idx, neg_subsample]
+            np.random.shuffle(idx)
+            X,y = X[idx], y[idx]
+        y = np.c_[1-y, y] if self.y_oh else y.reshape(-1,1)
+        return X, y
 
     def __iter__(self):
         assert self.fitted, "First fit the sampler to your data"
@@ -86,6 +49,15 @@ class Subsampler():
             idx = np.r_[self.pos_idx, neg_subsample]
             np.random.shuffle(idx)
             yield self.X_[idx], self.y_[idx]
+
+    def get_generator(self):
+        assert self.fitted, "First fit the sampler to your data"
+        while True:
+            neg_subsample = np.random.choice(self.neg_idx, int(self.n_pos*self.neg_weight), replace=False)
+            idx = np.r_[self.pos_idx, neg_subsample]
+            np.random.shuffle(idx)
+            yield self.X_[idx], self.y_[idx]
+
 
 class RBF_transformer(TransformerMixin):
     def __init__(self, num_clusters, cache=True):
@@ -163,6 +135,53 @@ class RBF_transformer(TransformerMixin):
     def fit_transform(self, X, y=None, **fit_params):
         self.fit(X,y)
         return self.transform(X)
+
+
+class MinibatchOptimized():
+    """helper class to provide "fit" method"""
+    def score(self, X, y, sample_weight=None):
+        raise NotImplementedError
+
+    def step(self, X_train, Y_train):
+        """
+        implements the gradient descent step and updates parameters
+        """
+        raise NotImplementedError
+
+    def fit(self, X_train, Y_train, batch_generator, valid_set=None, n_epochs=1,**fit_params):
+        batch_generator.fit(X_train, Y_train)
+        Xtr,ytr = batch_generator.transform(X_train, Y_train)
+        if valid_set:
+            Xv,yv = batch_generator.transform(*valid_set)
+        
+        #initializing training history
+        hist = []
+        scores = [0,0,0] if valid_set else [0,0]
+        scores[1] = self.score(Xtr, ytr)
+        if valid_set:
+            scores[2] = self.score(Xv, yv)
+        hist.append(tuple(scores))
+        
+        #initializing iterators
+        epochs = tqdm(range(1, n_epochs))
+
+        for i in epochs:
+            scores[0] = i
+            for batch in batch_generator:
+                self.step(*batch)
+
+            scores[1] = self.score(Xtr, ytr)
+            dsc = f"epoch: {i} train-sc={scores[1]:.3f}"
+            
+            if valid_set:
+                scores[2] = self.score(Xv, yv)
+                dsc += f" valid-sc={scores[2]:.3f}"
+
+            hist.append(tuple(scores))
+            epochs.set_description(dsc)
+        self.fit_hist_ = hist
+        return self
+
 
 class LinRegression(RegressorMixin, MinibatchOptimized):
     def __init__(self, lr=0.01, lambda_=1, n_features=1, class_threshold=0.5, metric='RMSE'):
