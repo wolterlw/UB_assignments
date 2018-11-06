@@ -1,0 +1,5 @@
+jobid
+n
+nnodes
+ncores
+Tp
