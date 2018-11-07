@@ -14,8 +14,10 @@
 #include <iostream>
 #include <random>
 #include <list>
+#include <set>
 #include <algorithm>
 #include <functional>
+
 
 // IMPLEMENT ME!
 template <typename T, typename Pred>
@@ -25,77 +27,67 @@ void mpi_extract_if(MPI_Comm comm, const std::vector<T>& in, std::vector<T>& out
 	MPI_Comm_size(comm, &size);
 	MPI_Comm_rank(comm, &rank);
 
-	bool* flag_buf;
-	MPI_Alloc_mem(sizeof(bool), MPI_INFO_NULL, &flag_buf);
-	*flag_buf = false;
+	int* comm_with; //if comm_with == rank - he's free
+	MPI_Alloc_mem(sizeof(int), MPI_INFO_NULL, &comm_with);
+	*comm_with = size+1;
 
-	MPI_Win win_waiting;
-	MPI_Win_create(flag_buf, sizeof(bool), sizeof(bool),\
-				   MPI_INFO_NULL, comm, &win_waiting);
+	MPI_Win win_status;
+	MPI_Win_create(comm_with, sizeof(int), sizeof(int),\
+				   MPI_INFO_NULL, comm, &win_status);
 
-	// compute extract_if
-	for(auto const& value: in) {
-		if(pred(value)) out.push_back(value); //since this is a vector maybe it's not the best way
-	}
-
-	std::cout << rank << " finished extracting" << std::endl;
-
-	// compute random indices
-	std::vector<int> indices(out.size());
+	// compute extract_if and fill matrix of lists with elements
 	std::mt19937 rng(0); //try using different seed if it's gonna be uneven
 	std::uniform_int_distribution<int> idx_dist(0, size-1);
-	std::generate(\
-		std::begin(indices),\
-		std::end(indices),\
-		std::bind(idx_dist, rng));
-	// TODO: try deleting indices that ==rank to speed up list traversal
 
-	// create a vector of indices whom we should visit
-	std::list<int> to_visit(size);
-	std::iota(std::begin(to_visit), std::end(to_visit), 0);
-	to_visit.remove(rank);
+	std::vector< std::list<T> > rank_elements(size); //test this
+	for(auto const& value: in){
+		if(pred(value)) rank_elements[idx_dist(rng)].push_back(value);
+	}
+	// by now in rank_elements I have extracted elements distributed per rank
+	// also we can now check size of each message easily
 
-	int rank_from;
-	// call checking if anyone is ready to receive
-	while (~to_visit.empty()){
-		bool is_waiting = false;
+	// create a set of indices whom we should visit
+	std::set<int> to_visit;
+	for(int i=0; i<size; i++) if (i != rank) to_visit.insert(i);
+
+	//check if somebody in the queue is ready to interact
+	*comm_with = rank;
+
+	int other_comm_with;
+	for(int k=0; k < 5; k++){
+		std::cout << rank << " in here " << std::endl;
+		//partner exchange phase
 		for(auto const& i : to_visit){
-			MPI_Win_lock(MPI_LOCK_EXCLUSIVE, i, 0, win_waiting);
-			MPI_Get(&is_waiting, 1, \
-					MPI_C_BOOL, i, 0, 1, \
-					MPI_C_BOOL, win_waiting);
-			if(is_waiting){
-				init_transfer(rank, i);
-				MPI_Win_unlock(i, win_waiting); // unlocking so that anyone can see this guy is busy
-				transfer_data(rank, i, indices, out); //performing actual transfer
-				to_visit.remove(i);
-			}
+			MPI_Win_lock(MPI_LOCK_EXCLUSIVE, i, 0, win_status);
+			MPI_Get(&other_comm_with, 1, \
+					MPI_INT, i, 0, 1, \
+					MPI_INT, win_status);
+			std::cout << rank << " got " << other_comm_with << " from " << i << std::endl;
+			if(other_comm_with == i){
+				std::cout << rank << " initiates comm with " << i << std::endl;
+				MPI_Put(&rank, 1, MPI_INT, i, 0, 1, MPI_INT, win_status);
+				MPI_Win_lock(MPI_LOCK_EXCLUSIVE, rank, 0, win_status);
+				MPI_Put(&i, 1, MPI_INT, rank, 0, 1, MPI_INT, win_status);
+				MPI_Win_unlock(rank, win_status);
+				MPI_Win_unlock(i, win_status); // unlocking so that anyone can see this guy is busy
+			} else  MPI_Win_unlock(i ,win_status);
 		}
-		*flag_buf = true; //telling that I'm ready to receive
-		rank_from = wait_for_transfer(rank); //setting flag_buf to false; 
-		//make sure this ^ guy won't wait forever
-		receive_data(rank, rank_from, indices, out);
+		//data exchange phase
+		std::cout << rank << " now comms with " << *comm_with << std::endl;
+		if (*comm_with != rank) {
+			std::cout << rank << " is exchanges data with " << *comm_with << std::endl;
+			to_visit.erase(*comm_with);
+			MPI_Win_lock(MPI_LOCK_EXCLUSIVE, rank, 0, win_status);
+			MPI_Put(&rank, 1, MPI_INT, rank, 0, 1, MPI_INT, win_status);
+			MPI_Win_unlock(rank, win_status);
+		}
+
+
 	}
 
 	//
-	MPI_Win_free(&win_waiting);
-	MPI_Free_mem(flag_buf);
+	MPI_Win_free(&win_status);
+	MPI_Free_mem(comm_with);
 } // mpi_extract_if
 
 #endif // A1_HPP
-
-void init_transfer(int rank, int to_rank){
-
-}
-
-void transfer_data(int rank, int to_rank, const std::vector<int>& indices, const std::vector<int>& out){
-
-}
-
-int wait_for_transfer(int rank){
-
-}
-
-int receive_data(int rank, int rank_from, const std::vector<int>& indices, const std::vector<int>& out){
-	
-}
