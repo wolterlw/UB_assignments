@@ -25,7 +25,9 @@ class Subsampler():
         self.pos_idx = np.argwhere(y == 1)[:, 0]
         self.neg_idx = np.argwhere(y == 0)[:, 0]
         self.n_pos = len(self.pos_idx)
-        self.norm_val = X.max(axis=0)
+        max_ = X.max(axis=0)
+        max_[max_ == 0] = 1
+        self.norm_val = max_
         self.X_ = X / self.norm_val if self.normalize else X 
         self.y_ = np.c_[1-y, y] if self.y_oh else y.reshape(-1,1)
         self.fitted = True
@@ -35,7 +37,7 @@ class Subsampler():
         if sample:
             pos_idx = np.argwhere(y == 1)[:, 0]
             neg_idx = np.argwhere(y == 0)[:, 0]
-            neg_subsample = np.random.choice(neg_idx, int(len(pos_idx)*self.neg_weight), replace=False)
+            neg_subsample = np.random.choice(neg_idx, int(len(pos_idx)*self.neg_weight), replace=True)
             idx = np.r_[pos_idx, neg_subsample]
             np.random.shuffle(idx)
             X,y = X[idx], y[idx]
@@ -45,7 +47,7 @@ class Subsampler():
     def __iter__(self):
         assert self.fitted, "First fit the sampler to your data"
         for i in range(self.num_batches):
-            neg_subsample = np.random.choice(self.neg_idx, int(self.n_pos*self.neg_weight), replace=False)
+            neg_subsample = np.random.choice(self.neg_idx, int(self.n_pos*self.neg_weight), replace=True)
             idx = np.r_[self.pos_idx, neg_subsample]
             np.random.shuffle(idx)
             yield self.X_[idx], self.y_[idx]
@@ -53,7 +55,7 @@ class Subsampler():
     def get_generator(self):
         assert self.fitted, "First fit the sampler to your data"
         while True:
-            neg_subsample = np.random.choice(self.neg_idx, int(self.n_pos*self.neg_weight), replace=False)
+            neg_subsample = np.random.choice(self.neg_idx, int(self.n_pos * self.neg_weight), replace=True)
             idx = np.r_[self.pos_idx, neg_subsample]
             np.random.shuffle(idx)
             yield self.X_[idx], self.y_[idx]
@@ -150,9 +152,9 @@ class MinibatchOptimized():
 
     def fit(self, X_train, Y_train, batch_generator, valid_set=None, n_epochs=1,**fit_params):
         batch_generator.fit(X_train, Y_train)
-        Xtr,ytr = batch_generator.transform(X_train, Y_train)
+        Xtr, ytr = batch_generator.transform(X_train, Y_train, sample=True)
         if valid_set:
-            Xv,yv = batch_generator.transform(*valid_set)
+            Xv, yv = batch_generator.transform(*valid_set, sample=True)
         
         #initializing training history
         hist = []
