@@ -44,9 +44,8 @@ int main(int argc, char* argv[]) {
 
     std::mt19937 rng(13 * rank);
     std::uniform_int_distribution<int> ui(1, 10000000);
-
-    std::vector<int> X(std::atol(argv[1]));
-    std::generate(std::begin(X), std::end(X), std::bind(ui, rng));
+    std::vector<int> X(std::atol(argv[1]),0);
+    if (rank != 0) std::generate(std::begin(X), std::end(X), std::bind(ui, rng));
 
     std::vector<int> Y;
 
