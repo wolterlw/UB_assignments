@@ -32,9 +32,14 @@ int main(int argc, char* argv[]) {
     
     std::set<int> send_to = {1-rank};
 
+    std::cout<< rank << " "; 
     handler.send_to(send_to, MPI_INT, MPI_COMM_WORLD);
-    sleep(2);
+
+    std::cout<< rank << " "; 
     handler.init_receive(send_to, MPI_INT, MPI_COMM_WORLD);
+    handler.finalize_out(rank);
+    handler.clear_sent();
+
    	// // // handler.print(1-rank);
    	std::cout << "Fin" << std::endl;
     return MPI_Finalize();

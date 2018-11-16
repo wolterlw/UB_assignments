@@ -33,7 +33,7 @@ class DataHandler{
 		for (auto const& i: send_to){ 
 			send_data_queue.emplace_back();
 			for (auto const& value: data[i])\
-				send_data_queue.back().push_back(value);
+				send_data_queue[0].push_back(value);
 
 			std::cout << "Sending: ";
 			for (auto const& value: send_data_queue.back())\
@@ -41,7 +41,7 @@ class DataHandler{
 			std::cout << std::endl;			
 
 			send_req_queue.emplace_back();
-			MPI_Isend(&send_data_queue.back(),
+			MPI_Isend(&send_data_queue.back()[0],
 					  send_data_queue.back().size(), dtype,
 					  i, TAG_DATA, comm, &send_req_queue.back());
 		}
@@ -57,46 +57,34 @@ class DataHandler{
 
 	void init_receive(const std::set<int>& recv_from, MPI_Datatype dtype, MPI_Comm comm){
 		int size_tmp = -1;
-		std::cout << "receiving from ";
-		for (auto const& i: recv_from) std::cout << i << ",";
-		std::cout << std::endl;
-
+		
 		for (auto const& i: recv_from){
 			MPI_Status status;
 			MPI_Probe(i, TAG_DATA, comm, &status);
 			MPI_Get_count(&status, MPI_INT, &size_tmp);
-			
-			std::cout << "size: " << size_tmp << std::endl;
+
 			recv_data_queue[i].resize(size_tmp);
 
-			std::vector<int> v(size_tmp, 0);
-			MPI_Recv(&v[0], size_tmp, dtype,\
-					  i, TAG_DATA, comm, MPI_STATUS_IGNORE);
+			MPI_Irecv(&recv_data_queue[i][0], size_tmp, dtype,\
+					  i, TAG_DATA, comm, &recv_req_queue[i]);
+			
 			std::cout << "Received: ";
-			for (auto const& j: v) std::cout << j << ",";
+			for (auto const& j: recv_data_queue[i]) std::cout << j << ",";
 			std::cout << std::endl;
 		}
 	}
 
-	// void finalize_out(int rank, std::vector<T>& out){
-		// std::cout << rank << " here with " << recv_req_queue.size() << " elems ";
-		// MPI_Wait(recv_req_queue[1-rank], MPI_STATUS_IGNORE);
-		// for (int i=0; i < recv_req_queue.size(); i++){
-		// 	// if (i != rank) MPI_Wait(&recv_req_queue[i], MPI_STATUS_IGNORE);
-		// 	std::cout << i << ",";
-		// }
-		// std::cout << std::endl;
-		// }
-		// for (auto const& request: recv_req_queue) MPI_Wait(&request, MPI_STATUS_IGNORE);
-		// weird
-
-		// long final_size = 0;
-		// for (auto const& part: recv_data_queue) final_size += part.size();
-		// std::cout << "reserved size: " << final_size << std::endl;
+	void finalize_out(int rank){//, std::vector<T>& out){
+		for (int i=0; i < recv_req_queue.size(); i++)\
+				if (i != rank) MPI_Wait(&recv_req_queue[i], MPI_STATUS_IGNORE);
+		
+		long final_size = 0;
+		for (auto const& part: recv_data_queue) final_size += part.size();
+		std::cout << "reserved size: " << final_size << std::endl;
 		// out.reserve(final_size);
 		// for(auto && v: recv_data_queue)\
 		//   out.insert(out.end(), v.begin(), v.end());
-	// }
+	}
 
 	~DataHandler(){
 		send_data_queue.clear();
