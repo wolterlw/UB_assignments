@@ -1,6 +1,6 @@
 // File: a1.hpp
-// FirstName
-// LastName
+// Volodymyr
+// Liunda
 // I AFFIRM THAT WHEN WORKING ON THIS ASSIGNMENT
 // I WILL FOLLOW UB STUDENT CODE OF CONDUCT, AND
 // I WILL NOT VIOLATE ACADEMIC INTEGRITY RULES
@@ -20,8 +20,8 @@
 #include <algorithm>
 #include <functional>
 #include <iterator>
+#include <cstdlib>
 
-#define TAG_SIZE 401
 #define TAG_DATA 402
 
 template <typename T>
@@ -30,26 +30,35 @@ class DataHandler{
 	std::vector<std::vector<T>> recv_data_queue;
 	std::deque<MPI_Request> send_req_queue;
 	std::vector<MPI_Request> recv_req_queue;
+	
+	std::set<int> to_recv_from;
+	std::set<int> recvd;
+	int rank;
+	MPI_Datatype dtype;
+	MPI_Comm comm;
 
 	const std::vector<std::deque<T>>& data;
 
 	public:
-	DataHandler(const std::vector<std::deque<T>>& data_deque) :data(data_deque){
+	DataHandler(int rank, const std::vector<std::deque<T>>& data_deque,\
+				MPI_Datatype dtype, MPI_Comm comm\
+				) :data(data_deque), rank(rank), dtype(dtype), comm(comm){
 		recv_data_queue.resize(data_deque.size());
 		recv_req_queue.resize(data_deque.size());
+		for (int i=0; i < data_deque.size(); i++)\
+			if (i != rank) to_recv_from.insert(i);
 	}
 
-	void send_to(const std::set<int>& send_to, MPI_Datatype dtype, MPI_Comm comm){
-		for (auto const& i: send_to){ 
-			send_data_queue.emplace_back();
-			for (auto const& value: data[i])\
-				send_data_queue[0].push_back(value);
+	void send_to(int send_to){
+		send_data_queue.emplace_back();
+		for (auto const& value: data[send_to])\
+			send_data_queue.back().push_back(value);
 
-			send_req_queue.emplace_back();
-			MPI_Isend(&send_data_queue.back()[0],
-					  send_data_queue.back().size(), dtype,
-					  i, TAG_DATA, comm, &send_req_queue.back());
-		}
+		send_req_queue.emplace_back();
+
+ 		MPI_Isend(&send_data_queue.back()[0],
+				  send_data_queue.back().size(), dtype,
+				  send_to, TAG_DATA, comm, &send_req_queue.back());
 	}
 
 	void clear_sent(){
@@ -60,31 +69,44 @@ class DataHandler{
 		}
 	}
 
-	void init_receive(MPI_Datatype dtype, MPI_Comm comm){
-		int size_tmp = -1;
-		int flag;
+	void init_receive(){
+		int size_tmp = 0;
+		int flag = 0;
+		int any = 0;
 		MPI_Status status;
 
-		while (MPI_Iprobe(MPI_ANY_SOURCE, TAG_DATA, comm, &flag, &status)){
-			
+		recvd.clear();
+		for(auto const& i: to_recv_from){
+			MPI_Iprobe(i, TAG_DATA, comm, &flag, &status);
 			MPI_Get_count(&status, MPI_INT, &size_tmp);
-			recv_data_queue[status.MPI_SOURCE].resize(size_tmp);
-
-			MPI_Irecv(&recv_data_queue[status.MPI_SOURCE][0], size_tmp, \
-					  dtype, status.MPI_SOURCE, TAG_DATA, comm, \
-					  &recv_req_queue[status.MPI_SOURCE]);
+			if(flag){
+				recv_data_queue[i].resize(size_tmp);
+				recvd.insert(i);
+				MPI_Irecv(&recv_data_queue[status.MPI_SOURCE][0], size_tmp, \
+						  dtype, status.MPI_SOURCE, TAG_DATA, comm, \
+						  &recv_req_queue[status.MPI_SOURCE]);
+			}
 		}
+		for(auto const& i: recvd) to_recv_from.erase(i);
+
 	}
 
-	void finalize_out(int rank, std::vector<T>& out){//, std::vector<T>& out){
+	int received_all(){
+		return to_recv_from.empty();
+	}
+
+	void finalize_out(std::vector<T>& out){
 		for (int i=0; i < recv_req_queue.size(); i++)\
 				if (i != rank) MPI_Wait(&recv_req_queue[i], MPI_STATUS_IGNORE);
 		
 		long final_size = 0;
 		for (auto const& part: recv_data_queue) final_size += part.size();
 		out.reserve(final_size);
+
 		for(auto && v: recv_data_queue)\
 			out.insert(out.end(), v.begin(), v.end());
+
+		out.insert(out.end(), data[rank].begin(), data[rank].end());
 	}
 
 	~DataHandler(){
@@ -127,64 +149,60 @@ void mpi_extract_if(MPI_Comm comm, const std::vector<T>& in, std::vector<T>& out
 	for(auto const& value: in)
 		if(pred(value)) rank_elements[idx_dist(rng)].push_back(value);
 
-
-
-	if (rank < 2) {
-	  double S = 0.0;
-      for (int i = 1; i < 10000; ++i)
-		for (int j = 1; j < 10000; ++j)
-			for (int k = 1; k < 10000; ++k) S+= i * j * k;
-	   std::cout << S << std::endl;
-	}
 	// by now in rank_elements I have extracted elements distributed per rank
-
-	std::cout << ">" << rank << " here we go" << std::endl;
-
 
 	// create a set of indices whom we should visit
 	std::set<int> visited;
 	std::set<int> to_visit;
-	for(int i=0; i<size; i++) if (i != rank) to_visit.insert(i);
+	for(int i=0; i<size; i++){
+		if (i != rank) to_visit.insert(i);
+	}
 	
 	//say that I'm ready
-	DataHandler<T> data_handler(rank_elements);
-
+	DataHandler<T> data_handler(rank, rank_elements, JUST_BYTES, comm);
+	
+	MPI_Win_lock(MPI_LOCK_EXCLUSIVE, rank, 0, win_status);
 	*im_free = 1;
+	MPI_Win_unlock(rank, win_status);
 
 	int other_free;
 	MPI_Request curr_req;
 
 	int k = 0;
+	std::vector<int> to_visit_vec;
+	to_visit_vec.reserve(to_visit.size());
 	// checking who else is free to communicate
 	while (not to_visit.empty()) { //change it into a while loop
 		visited.clear();
+
+		// randomizing visit order
+		to_visit_vec.clear();
+		for(auto const& i : to_visit) to_visit_vec.push_back(i);
+		std::shuffle(to_visit_vec.begin(), to_visit_vec.end(), rng);
+
 		k++; 
-		for(auto const& i : to_visit){
-			std::cout << ">" << rank << " start" << std::endl;
-			MPI_Win_lock(MPI_LOCK_SHARED, i, 0, win_status);
+		for(auto const& i : to_visit_vec){
+			MPI_Win_lock(MPI_LOCK_SHARED, i, MPI_MODE_NOCHECK, win_status);
 			MPI_Get(&other_free, 1, MPI_INT, \
 					i, 0, 1, MPI_INT, win_status);
 			// MPI_Wait(&curr_req, MPI_STATUS_IGNORE);
 			MPI_Win_unlock(i, win_status);
-			std::cout << ">" << rank << " stop" << std::endl;
 
 			if (other_free){
-	
 				visited.insert(i);
+				data_handler.send_to(i);
 			}
 		}
 		//sending data
-		data_handler.send_to(visited, JUST_BYTES, comm);
-
+		for(auto const& i : visited) to_visit.erase(i);
 		//receiving data
-		data_handler.init_receive(JUST_BYTES, comm);
-		for (auto const& i: visited) to_visit.erase(i);
-		std::cout << k << ": " << rank << "visits [" << std::flush;
-		for (auto const& i: visited) std::cout << i << "," << std::flush;
-		std::cout << "]" << std::endl;
+		data_handler.init_receive();
 	}
 	// finalizing setup
-	// data_handler.finalize_out(rank, out);
+	while (not data_handler.received_all()){
+		data_handler.init_receive();
+	}
+	data_handler.finalize_out(out);
 	MPI_Type_free(&JUST_BYTES);
 
 	MPI_Win_free(&win_status);
