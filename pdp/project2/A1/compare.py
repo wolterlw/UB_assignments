@@ -3,8 +3,8 @@ files_mpi = [f'{i}_mpi.csv' for i in range(4)]
 
 def readfile(filename):
     with open(filename,'r') as f:
-        ints = [int(x) for x in f.read().split(',')[:-1]]
-    return ints
+        dicts = [eval(x) for x in f.read().split(';')[:-1]]
+    return dicts
 
 act = []
 mpi = []
@@ -15,4 +15,4 @@ for f in files_actual:
 for f in files_mpi:
     mpi += readfile(f)
 
-print(sorted(act) == sorted(mpi))
+print(sorted(act, key=lambda x: x['a']) == sorted(mpi, key=lambda x: x['a']))

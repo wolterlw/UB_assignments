@@ -24,9 +24,20 @@
 #include <fstream>
 #include <sstream>
 
-bool is_prime(int x) {
-    if (x < 2) return false;
-    for (int i = 2; i <= std::sqrt(x); ++i) if ((x % i) == 0) return false;
+class S
+{
+public:
+    int a;
+    float b;
+    S(){};
+    S(int a, float b): a(a), b(b){};
+    ~S(){};
+    
+};
+
+bool is_prime(S x) {
+    if (x.a < 2) return false;
+    for (int i = 2; i <= std::sqrt(x.a); ++i) if ((x.a % i) == 0) return false;
     return true;
 } // is_prime
 
@@ -45,10 +56,16 @@ int main(int argc, char* argv[]) {
 
     std::mt19937 rng(13 * rank);
     std::uniform_int_distribution<int> ui(1, 10000000);
-    std::vector<int> X(std::atol(argv[1]),0);
-    std::generate(std::begin(X), std::end(X), std::bind(ui, rng));
+    std::vector<S> X;
 
-    std::vector<int> Y;
+    long x_size = std::atol(argv[1]);
+    X.reserve(x_size);
+
+    for (int i=0; i < x_size; i++){
+        X.push_back( S( ui(rng), 0.5) );
+    }
+
+    std::vector<S> Y;
 
     std::ofstream f_actual;
     std::stringstream fn_actual;
@@ -60,7 +77,13 @@ int main(int argc, char* argv[]) {
     fn_mpi << rank << "_mpi.csv";
 
     f_actual.open(fn_actual.str());
-    for (auto const& i: X) if (is_prime(i)) f_actual << i << ",";
+    
+    for (auto const& i: X) if (is_prime(i)){
+        f_actual << "{";
+        f_actual << "'a': " << i.a << ",";
+        f_actual << "'b': " << i.b;
+        f_actual << "};";
+    }
     f_actual.close();
 
     auto start = MPI_Wtime();
@@ -69,7 +92,13 @@ int main(int argc, char* argv[]) {
     auto end = MPI_Wtime();
 
     f_mpi.open(fn_mpi.str());
-    for (auto const& i: Y) f_mpi << i << ",";
+    
+    for (auto const& i: Y) if (is_prime(i)){
+        f_mpi << "{";
+        f_mpi << "'a': " << i.a << ",";
+        f_mpi << "'b': " << i.b;
+        f_mpi << "};";
+    }
     f_mpi.close();
 
     if (rank == 0) std::cout << (end - start) << std::endl;

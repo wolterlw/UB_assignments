@@ -18,9 +18,9 @@
 #include <deque>
 #include <set>
 #include <algorithm>
-#include <functional>
-#include <iterator>
-#include <cstdlib>
+// #include <functional>
+// #include <iterator>
+// #include <cstdlib>
 
 #define TAG_DATA 402
 
@@ -37,22 +37,25 @@ class DataHandler{
 	MPI_Datatype dtype;
 	MPI_Comm comm;
 
-	const std::vector<std::deque<T>>& data;
+	const std::vector<std::deque<int>>& data_idx;
+	const std::vector<T>& in_data;
 
 	public:
-	DataHandler(int rank, const std::vector<std::deque<T>>& data_deque,\
+	DataHandler(int rank,\
+				const std::vector<T>& in,\
+				const std::vector<std::deque<int>>& idx_deque,\
 				MPI_Datatype dtype, MPI_Comm comm\
-				) :data(data_deque), rank(rank), dtype(dtype), comm(comm){
-		recv_data_queue.resize(data_deque.size());
-		recv_req_queue.resize(data_deque.size());
-		for (int i=0; i < data_deque.size(); i++)\
+				): rank(rank), in_data(in), data_idx(idx_deque), dtype(dtype), comm(comm){
+		recv_data_queue.resize(idx_deque.size());
+		recv_req_queue.resize(idx_deque.size());
+		for (int i=0; i < idx_deque.size(); i++)\
 			if (i != rank) to_recv_from.insert(i);
 	}
 
 	void send_to(int send_to){
 		send_data_queue.emplace_back();
-		for (auto const& value: data[send_to])\
-			send_data_queue.back().push_back(value);
+		for (auto const& idx: data_idx[send_to])\
+			send_data_queue.back().push_back(in_data[idx]);
 
 		send_req_queue.emplace_back();
 
@@ -72,7 +75,6 @@ class DataHandler{
 	void init_receive(){
 		int size_tmp = 0;
 		int flag = 0;
-		int any = 0;
 		MPI_Status status;
 
 		recvd.clear();
@@ -88,7 +90,6 @@ class DataHandler{
 			}
 		}
 		for(auto const& i: recvd) to_recv_from.erase(i);
-
 	}
 
 	int received_all(){
@@ -101,12 +102,13 @@ class DataHandler{
 		
 		long final_size = 0;
 		for (auto const& part: recv_data_queue) final_size += part.size();
-		out.reserve(final_size);
+		out.reserve(final_size + data_idx[rank].size());
 
 		for(auto && v: recv_data_queue)\
 			out.insert(out.end(), v.begin(), v.end());
 
-		out.insert(out.end(), data[rank].begin(), data[rank].end());
+		for(auto & idx: data_idx[rank])\
+			out.push_back(in_data[idx]);
 	}
 
 	~DataHandler(){
@@ -131,7 +133,7 @@ void mpi_extract_if(MPI_Comm comm, const std::vector<T>& in, std::vector<T>& out
 	MPI_Type_commit(&JUST_BYTES);
 
 	// creating a window
-	int* im_free; // try changing it to bool
+	int* im_free;
 	MPI_Alloc_mem(sizeof(int), MPI_INFO_NULL, &im_free);
 	*im_free = 0;
 
@@ -145,11 +147,14 @@ void mpi_extract_if(MPI_Comm comm, const std::vector<T>& in, std::vector<T>& out
 	std::mt19937 rng(rank); //try using different seed if it's gonna be uneven
 	std::uniform_int_distribution<int> idx_dist(0, size-1);
 
-	std::vector<std::deque<T> > rank_elements(size); //test this
-	for(auto const& value: in)
-		if(pred(value)) rank_elements[idx_dist(rng)].push_back(value);
+	std::vector<std::deque<int> > rank_extracted_idx(size); //test this
+	// for(auto const& value: in)
+	// 	if(pred(value)) rank_extracted_idx[idx_dist(rng)].push_back(value);
 
-	// by now in rank_elements I have extracted elements distributed per rank
+	for(int i=0; i<in.size(); i++)
+		if(pred(in[i])) rank_extracted_idx[idx_dist(rng)].push_back(i);
+
+	// by now in rank_extracted_idx I have extracted elements distributed per rank
 
 	// create a set of indices whom we should visit
 	std::set<int> visited;
@@ -159,7 +164,7 @@ void mpi_extract_if(MPI_Comm comm, const std::vector<T>& in, std::vector<T>& out
 	}
 	
 	//say that I'm ready
-	DataHandler<T> data_handler(rank, rank_elements, JUST_BYTES, comm);
+	DataHandler<T> data_handler(rank, in, rank_extracted_idx, JUST_BYTES, comm);
 	
 	MPI_Win_lock(MPI_LOCK_EXCLUSIVE, rank, 0, win_status);
 	*im_free = 1;
@@ -199,6 +204,7 @@ void mpi_extract_if(MPI_Comm comm, const std::vector<T>& in, std::vector<T>& out
 		data_handler.init_receive();
 	}
 	// finalizing setup
+	data_handler.clear_sent();
 	while (not data_handler.received_all()){
 		data_handler.init_receive();
 	}

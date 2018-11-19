@@ -15,11 +15,11 @@
 #SBATCH --error=%j.stderr
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=12
-#SBATCH --time=00:10:00
+#SBATCH --time=00:05:00
 
 ####### check modules to see which version of MPI is available
 ####### and use appropriate module if needed
 module load intel-mpi/2017.0.1
 export I_MPI_PMI_LIBRARY=/usr/lib64/libpmi.so
 
-srun ./a1_test 100000000
+srun -n 48 ./a1 10000000
