@@ -1,3 +1,0 @@
-squeue - shows statue of the queue
-sbatch
-srun
