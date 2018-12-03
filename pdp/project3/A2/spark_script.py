@@ -1,45 +1,54 @@
-import os
+from pyspark import SparkContext
 from operator import add
-from PySpark import SparkContext
+from sys import argv 
+def reverse(x):
+    yield x
+    yield x[::-1]
 
-def getParentsChildren(rdd):
-    return rdd.flatMap(
-        lambda x: [x,x[::-1]]
-    ).mapValues(
-        lambda x: [x]
-    ).reduceByKey(add).map(
-        lambda x: (x[0],{'p': [z for z in x[1] if z<x[0]],
-                         'c': [z for z in x[1] if z>x[0]]})
-    )
-
-def BigStar(pC):
-    l = len(pC[1]['p'])
+def LargeStar(pC):
+    l = len(pC[1][0])
     if l:
-        min_parent = min(pC[1]['p'])
-        new_edges = [[z,min_parent] for z in pC[1]['c']]
+        min_parent = min(pC[1][0])
+        new_edges = [(z, min_parent) for z in pC[1][1]]
         if l>1:
-            new_edges.append([-1,-1])
+            new_edges.append((-1,-1))
     else:
-        new_edges = [[z,pC[0]] for z in pC[1]['c']]
+        new_edges = [(z, pC[0]) for z in pC[1][1]]
     return new_edges
 
-def SmallStar(pC):
-    if pC[1]['p']:
-        min_parent = min(pC[1]['p'])
-        new_edges = [[z, min_parent] for z in pC[1]['p'] + [pC[0]]]
+def SmallStar(vP):
+    if len(vP[1]):
+        min_parent = min(vP[1])
+        new_edges = [(z, min_parent) for z in vP[1]]
+        new_edges.append((vP[0], min_parent))
         return new_edges
     else:
-        return [[-1,-1]] if pC[0]==-1 else []
+        return [(-1,-1)] if vP[0] == -1 else ()
 
 def iteration(edges):
-    return getParentsChildren(
-        getParentsChildren(edges).flatMap(BigStar)
-    ).flatMap(SmallStar)
+    all_pairs = edges.flatMap(reverse)
+
+    parents = all_pairs.filter(lambda x: x[0]>x[1])
+    children = all_pairs.filter(lambda x: x[0]<x[1])
+
+    return parents.groupWith(
+            children
+        ).flatMap(
+            LargeStar
+        ).flatMap(
+            reverse
+        ).filter(
+            lambda x: (x[0] == -1) | (x[0]>x[1])
+        ).groupByKey().flatMap(
+            SmallStar
+        ).filter(
+            lambda x: (x[0] == -1) | (x[0]!=x[1])
+        ).distinct()
 
 def ConnectedComponents(edges):
     rdds = [edges]
     for i in range(10**7):
-        print(i)
+        print(f"\n\niteration: {i}\n\n")
         rdds.append(iteration(rdds[-1]))
         rdds[-1].cache()
         if len(rdds[-1].lookup(-1)) == 0:
@@ -47,13 +56,12 @@ def ConnectedComponents(edges):
         rdds[-2].unpersist()
     return rdds[-1].reduceByKey(lambda x,y: x)
 
-sc = SparkContext(appName='A2_instacart')
-edges = sc.textFile(
-	'/user/vliunda/data/edges.txt'
-	).map(
-		lambda x: [int(y) for y in x.split(' ')[1:]]
-	)
+sc = SparkContext(appName='A2')
+
+lines = sc.textFile(argv[1])
+edges = lines.map(lambda x: tuple([int(y) for y in x.split(' ')]))
 
 res = ConnectedComponents(edges)
-lines = res.map(lambda edge: ' '.join(str(v) for v in edge))
-lines.saveAsTextFile('./res.txt')
+
+with open('/user/vliunda/data/res.txt','w') as f:
+    [f.write(f"{l[0] l[1]}") for l in res.collect()]
