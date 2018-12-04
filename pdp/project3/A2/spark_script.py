@@ -39,7 +39,7 @@ def iteration(edges):
             reverse
         ).filter(
             lambda x: (x[0] == -1) | (x[0]>x[1])
-        ).groupByKey().flatMap(
+        ).mapValues(lambda x: [x]).reduceByKey(add).flatMap(
             SmallStar
         ).filter(
             lambda x: (x[0] == -1) | (x[0]!=x[1])
@@ -47,14 +47,17 @@ def iteration(edges):
 
 def ConnectedComponents(edges):
     rdds = [edges]
-    for i in range(10**7):
-        print(f"\n\niteration: {i}\n\n")
+    while True:
         rdds.append(iteration(rdds[-1]))
         rdds[-1].cache()
         if len(rdds[-1].lookup(-1)) == 0:
             break
         rdds[-2].unpersist()
-    return rdds[-1].reduceByKey(lambda x,y: x)
+    children = rdds[-1].reduceByKey(lambda x,y: x)
+    #last piece to include parents
+    parents = children.map(lambda x: x[::-1]).reduceByKey(lambda x,y: -1).map(lambda x: (x[0],x[0]))
+    return parents.union(children)
+
 
 sc = SparkContext(appName='A2')
 
@@ -63,5 +66,4 @@ edges = lines.map(lambda x: tuple([int(y) for y in x.split(' ')]))
 
 res = ConnectedComponents(edges)
 
-with open('/user/vliunda/data/res.txt','w') as f:
-    [f.write(f"{l[0] l[1]}") for l in res.collect()]
+res.saveAsTextFile(argv[2])
