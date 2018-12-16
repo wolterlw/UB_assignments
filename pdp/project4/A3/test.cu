@@ -1,5 +1,11 @@
 #include <cmath>
 #include <iostream>
+#include <functional>
+#include <algorithm>
+#include <vector>
+#include <random>
+#include <chrono>
+#include <stdio.h>
 
 #define SQRT2PI 2.50662827463100050241
 
@@ -32,10 +38,15 @@
 
 // }
 
-__device__
-void print(int n, float h, const std::vector<float>& x, std::vector<float>& y){
-	int gidx = blockIdx.x * blockDim.x + threadIdx.x;
-	std::cout << gidx << std::endl;
+__global__
+void print(int n, float h, float* x, float* y){
+	extern __shared__ float  y_buf[];
+
+	//cudaMalloc(&y_buf, (size_t) n*sizeof(float));
+	int gidx  = blockIdx.x * blockDim.x + threadIdx.x;
+	
+	y_buf[threadIdx.x] = y[gidx];
+	printf("%d: %f\n", gidx, y_buf[threadIdx.x]);
 }
 
 __host__ 
@@ -43,7 +54,7 @@ void gaussian_kde(int n, float h, const std::vector<float>& x, std::vector<float
 	float* d_x;
 	float* d_y;
 
-	int size = n * sizeof(float)
+	int size = n * sizeof(float);
 	cudaMalloc(&d_x, size);
 	cudaMalloc(&d_y, size);
 
@@ -52,8 +63,8 @@ void gaussian_kde(int n, float h, const std::vector<float>& x, std::vector<float
 
 	int blockSize = 256;
 	int numBlocks = (n + blockSize - 1) / blockSize;
-
-	apply_kernel<<<numBlocks, blockSize>>>(n, h, d_x, d_y);
+	std::cout << numBlocks << std::endl ;
+	print<<<numBlocks, blockSize, blockSize*sizeof(float)>>>(n, h, d_x, d_y);
 	
 	cudaDeviceSynchronize();
 
