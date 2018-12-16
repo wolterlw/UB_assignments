@@ -9,9 +9,9 @@
 
 #define SQRT2PI 2.50662827463100050241
 
-// __device__ float gauss_kernel(float x){
-// 	return exp(-x*x / 2) / SQRT2PI
-// }
+__device__ float gauss_kernel(float x){
+    return exp(-x*x / 2) / SQRT2PI;
+}
 
 // __global__ void apply_kernel(int n, float h, float* x, float* y){
 // 	__shared__ float* y_buf;
@@ -40,13 +40,28 @@
 
 __global__
 void print(int n, float h, float* x, float* y){
-	extern __shared__ float  y_buf[];
+	extern __shared__ float  shared_mem[];
+	float* y_buf = &shared_mem[0];
+	float* x_buf = &shared_mem[blockDim.x];
+	float xr;
 
-	//cudaMalloc(&y_buf, (size_t) n*sizeof(float));
 	int gidx  = blockIdx.x * blockDim.x + threadIdx.x;
-	
-	y_buf[threadIdx.x] = y[gidx];
-	printf("%d: %f\n", gidx, y_buf[threadIdx.x]);
+	if (gidx < n){
+ 		xr = x[gidx];
+ 		y_buf[threadIdx.x] = y[gidx];
+
+ 		for (int i = 0; i < n; i+=gridDim.x){
+ 			int j = blockDim.x*(blockIdx.x + i) + threadIdx.x;
+ 			x_buf[threadIdx.x] = x[j];
+			__syncthreads();
+ 			for (int k = 0; k < blockDim.x; k++){
+ 				y_buf[threadIdx.x] += gauss_kernel((xr - x_buf[k]) / h);
+ 			}
+ 		}
+ 	}
+	y_buf[threadIdx.x] /= (n*h);
+
+	printf("%d: %f\t%f\n", gidx, y_buf[threadIdx.x], xr);
 }
 
 __host__ 
@@ -64,7 +79,7 @@ void gaussian_kde(int n, float h, const std::vector<float>& x, std::vector<float
 	int blockSize = 256;
 	int numBlocks = (n + blockSize - 1) / blockSize;
 	std::cout << numBlocks << std::endl ;
-	print<<<numBlocks, blockSize, blockSize*sizeof(float)>>>(n, h, d_x, d_y);
+	print<<<numBlocks, blockSize, 2 * blockSize*sizeof(float)>>>(n, h, d_x, d_y);
 	
 	cudaDeviceSynchronize();
 
@@ -77,7 +92,7 @@ int main(int argc, char const *argv[])
 {
 
 	int n = 512;
-	float h = 0.01;
+	float h = 0.1;
 
 	std::vector<float> x(n);
     std::vector<float> y(n, 0.0);
