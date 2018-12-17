@@ -4,14 +4,10 @@
  */
 
 #include <cmath>
-// #include <iostream>
 #include <functional>
 #include <algorithm>
 #include <vector>
-// #include <random>
-// #include <chrono>
-// #include <stdio.h>
-// #include <fstream>
+#include <cuda_runtime_api.h>
 
 #ifndef A3_HPP
 #define A3_HPP
