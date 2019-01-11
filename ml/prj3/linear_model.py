@@ -138,7 +138,6 @@ class RBF_transformer(TransformerMixin):
         self.fit(X,y)
         return self.transform(X)
 
-
 class MinibatchOptimized():
     """helper class to provide "fit" method"""
     def score(self, X, y, sample_weight=None):
@@ -152,9 +151,9 @@ class MinibatchOptimized():
 
     def fit(self, X_train, Y_train, batch_generator, valid_set=None, n_epochs=1,**fit_params):
         batch_generator.fit(X_train, Y_train)
-        Xtr, ytr = batch_generator.transform(X_train, Y_train, sample=True)
+        Xtr, ytr = batch_generator.transform(X_train, Y_train, **fit_params)
         if valid_set:
-            Xv, yv = batch_generator.transform(*valid_set, sample=True)
+            Xv, yv = batch_generator.transform(*valid_set, **fit_params)
         
         #initializing training history
         hist = []
@@ -165,7 +164,7 @@ class MinibatchOptimized():
         hist.append(tuple(scores))
         
         #initializing iterators
-        epochs = tqdm(range(1, n_epochs))
+        epochs = tqdm(range(1, n_epochs+1))
 
         for i in epochs:
             scores[0] = i
@@ -183,8 +182,7 @@ class MinibatchOptimized():
             epochs.set_description(dsc)
         self.fit_hist_ = hist
         return self
-
-
+    
 class LinRegression(RegressorMixin, MinibatchOptimized):
     def __init__(self, lr=0.01, lambda_=1, n_features=1, class_threshold=0.5, metric='RMSE'):
         self.params = {
@@ -266,77 +264,84 @@ class LogRegression(ClassifierMixin, MinibatchOptimized):
     def predict_proba(self, X):
         return np.asarray(self._sigm(X @ self.W)).reshape(-1,1)
 
-# class ptDataset(Dataset):
-#     def __init__(self, X, y, normalize=False):
-#         if normalize:
-#             Xn = X / X.max(axis=0)
-#         else:
-#             Xn = X
+class Batcher():
+    def __init__(self, batch_size, one_hot = True, fit_intercept = False, oh_order_func= sorted):
+        self.batch_size = batch_size
+        self.y_oh = one_hot
+        self.fitted = False
+        self.oh_of = oh_order_func
 
-#         self.X = torch.tensor(Xn).float()
-#         self.y = torch.tensor(y).long()
+    def _one_hot(self, y):
+        return np.c_[
+            [y == i for i in self.oh_of(np.unique(y))]
+        ].T.astype('uint8')
     
-#     def __len__(self):
-#         return len(self.y)
-    
-#     def __getitem__(self, idx):
-#         return {
-#             'X': self.X[idx],
-#             'y': self.y[idx]
-#         }
+    def fit(self, X, y):
+        self.X = X
+        self.y =  self._one_hot(y) if self.y_oh else y.reshape(-1,1)
+        self.fitted = True
 
-# class Net(nn.Module):
-#     """
-#     simplest two-layer perceptron in PyTorch
-#     """
-#     def __init__(self, in_size, out_size, hidden_size, lr=0.01):
-#         super(Net, self).__init__()
-#         self.params = {
-#             'in_size': in_size,
-#             'out_size': out_size,
-#             'hidden_size': hidden_size,
-#             'lr': lr
-#         }
-#         self._build_network()
+    def transform(self, X, y, **kwargs):
+        # X_ = X
+        # y_ = self._one_hot(y) if self.y_oh else y.reshape(-1,1)
+        return X, y
+
+    def __iter__(self):
+        assert self.fitted, "First fit the sampler to your data"
+        for i in range(0, len(self.X), self.batch_size):
+            yield self.X[i:i+self.batch_size], self.y[i:i+self.batch_size]
+
+    def get_generator(self):
+        while True:
+            idx = np.random.randint(0, len(self.X), size=self.batch_size)
+            yield self.X[idx], self.y[idx]
+    
+class SoftmaxRegression(MinibatchOptimized):
+    def __init__(self, n_features, n_classes, lr=0.01, lambda_=1, metric='accuracy', fit_intercept=False):
+        assert metric in {'accuracy'}
+        self.params = {
+            'lr': lr,
+            'lambda_': lambda_,
+            'fit_intercept': fit_intercept
+        }
+        self.n_classes = n_classes
+        self.n_features = n_features
+        self.metrics = {
+            'accuracy': accuracy_score
+        }
+        self.metric = metric
+        self.W = np.random.uniform(-1, 1 ,size=n_classes*(n_features+1)).reshape(n_classes, n_features+1)
         
-#     def _build_network(self):
-#         self.fc1 = nn.Linear(self.params['in_size'], self.params['hidden_size'])
-#         self.fc2 = nn.Linear(self.params['hidden_size'], self.params['out_size'])
+    def add_bias(self, X):
+        return np.c_[X, np.ones(len(X))]
 
-#     def forward(self, x):
-#         x = F.relu(self.fc1(x))
-#         x = self.fc2(x)
-#         return F.log_softmax(x, dim=1)
+    def score(self, X , y, sample_weight=None):
+        y_ = y if y.ndim == 1 else np.argmax(y, axis=1)
+        return self.metrics[self.metric](y_, self.predict(X))
+
+    def get_params(self, deep=True):
+        return self.params
     
-#     def fit(self, X_train, y_train, val_set=None, verbose=True,
-#             n_epochs=1, batch_size=1, class_weight=[1.,1.]):
-#         optimizer = torch.optim.SGD(self.parameters(), lr=self.params['lr'])
-#         data_train = ptDataset(X_train, y_train, normalize=True)
-#         if val_set:
-#             data_val = ptDataset(*val_set, normalize=True)
-#         loader = DataLoader(data_train, batch_size, shuffle=True)
-#         weight = torch.tensor(class_weight).float()
+    def set_params(self, **params):
+        self.params.update(params)
 
-#         if verbose:
-#             epochs = tqdm(range(n_epochs))
-#         else:
-#             epochs = range(n_epochs)
-        
-#         for epoch in epochs:
-#             total_loss = 0
-#             for batch in loader:
-#                 optimizer.zero_grad()
-#                 out = self(batch['X'])
-#                 loss = F.nll_loss(out, batch['y'], weight=weight)
-#                 loss.backward()
-#                 optimizer.step()
-#                 total_loss += loss.item()
-            
-#             if verbose:
-#                 acc_tr = (self(data_train.X).argmax(dim=1) == data_train.y).numpy().mean()
-#                 desc = f"loss: {total_loss:.4f} accuracy {acc_tr:.4f}"
-#                 if val_set:
-#                     pred_val = self(data_val.X).argmax(dim=1)
-#                     acc = (pred_val == data_val.y).numpy().mean()
-#                     desc += f" val_accuracy: {acc:.4f}"
-#                 epochs.set_description(desc)
+    def _softmax(self, x):
+        t = np.exp(x)
+        return  t / np.sum(t, axis=1)[:,np.newaxis]
+    
+    def _loss(self, s, y):
+        return (-np.log(s)*y).sum()
+
+    def step(self, X_batch, Y_batch):
+        X_ = self.add_bias(X_batch) if self.params['fit_intercept'] else X_batch
+        z = self.predict_proba(X_batch)
+        self.W += self.params['lr'] * (Y_batch - z).T @ X_ / len(X_)
+
+    def predict(self, X):
+        return np.argmax(
+            self.predict_proba(X),
+            axis=1)
+    
+    def predict_proba(self, X):
+        X_ = self.add_bias(X) if self.params['fit_intercept'] else X
+        return self._softmax(X_ @ self.W.T)
